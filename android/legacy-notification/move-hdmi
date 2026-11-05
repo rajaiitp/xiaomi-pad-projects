@@ -1,0 +1,2 @@
+#!/data/data/com.termux/files/usr/bin/sh
+printf 'move-hdmi\n\n' | exec su -c /data/data/com.termux/files/home/bin/tablet-playback

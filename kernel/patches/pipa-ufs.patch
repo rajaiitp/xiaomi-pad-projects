@@ -1,0 +1,69 @@
+diff --git i/drivers/scsi/ufs/ufs-qcom.c w/drivers/scsi/ufs/ufs-qcom.c
+index 94702b061..55a8ad68b 100644
+--- i/drivers/scsi/ufs/ufs-qcom.c
++++ w/drivers/scsi/ufs/ufs-qcom.c
+@@ -13,6 +13,7 @@
+  */
+ 
+ #include <linux/time.h>
++#include <linux/blk-mq.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/phy/phy.h>
+@@ -1628,7 +1629,6 @@ static void ufs_qcom_pm_qos_req_start(struct ufs_hba *hba, struct request *req)
+ 	unsigned long flags;
+ 	struct ufs_qcom_host *host;
+ 	struct ufs_qcom_pm_qos_cpu_group *group;
+-	int cpu;
+ 
+ 	if (!hba || !req)
+ 		return;
+@@ -1637,9 +1637,13 @@ static void ufs_qcom_pm_qos_req_start(struct ufs_hba *hba, struct request *req)
+ 	if (!host->pm_qos.groups)
+ 		return;
+ 
+-	cpu = raw_smp_processor_id();
+-
+-	group = &host->pm_qos.groups[ufs_qcom_cpu_to_group(host, cpu)];
++	/*
++	 * PM QoS requests are accounted per CPU group. Completion can run on
++	 * another CPU, so use the request's block-MQ submission CPU at both
++	 * edges of its lifecycle.
++	 */
++	group = &host->pm_qos.groups[ufs_qcom_cpu_to_group(host,
++						       blk_mq_rq_cpu(req))];
+ 
+ 	spin_lock_irqsave(hba->host->host_lock, flags);
+ 	if (!host->pm_qos.is_enabled)
+@@ -1665,9 +1669,11 @@ static void __ufs_qcom_pm_qos_req_end(struct ufs_qcom_host *host, int req_cpu)
+ 
+ 	group = &host->pm_qos.groups[ufs_qcom_cpu_to_group(host, req_cpu)];
+ 
+-	if (group->active_reqs <= 0)
+-		pr_err_ratelimited("ufshcd-qcom: active req coount is negative: %d\n",
++	if (group->active_reqs <= 0) {
++		pr_err_ratelimited("ufshcd-qcom: PM QoS active request underflow: %d\n",
+ 					group->active_reqs);
++		return;
++	}
+ 	if (--group->active_reqs)
+ 		return;
+ 	group->state = PM_QOS_REQ_UNVOTE;
+@@ -1678,16 +1684,13 @@ static void ufs_qcom_pm_qos_req_end(struct ufs_hba *hba, struct request *req,
+ 	bool should_lock)
+ {
+ 	unsigned long flags = 0;
+-	int cpu;
+ 
+ 	if (!hba || !req)
+ 		return;
+ 
+-	cpu = raw_smp_processor_id();
+-
+ 	if (should_lock)
+ 		spin_lock_irqsave(hba->host->host_lock, flags);
+-	__ufs_qcom_pm_qos_req_end(ufshcd_get_variant(hba), cpu);
++	__ufs_qcom_pm_qos_req_end(ufshcd_get_variant(hba), blk_mq_rq_cpu(req));
+ 	if (should_lock)
+ 		spin_unlock_irqrestore(hba->host->host_lock, flags);
+ }

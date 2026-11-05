@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Move HDMI</string>
+    <string name="tile_label">Move HDMI</string>
+    <string name="caffeinate_tile_label">Caffeinate</string>
+</resources>

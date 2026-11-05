@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Reading Mode</string>
+    <string name="instructions">Use the Quick Settings tile for offline, quiet reading.\n\nOn: your Night Light warmth, Battery Saver, Wi-Fi and Bluetooth off, and notifications silenced. Alarms remain available unless already silenced.\n\nTap again to restore your previous settings. Remote access stops while Wi-Fi is off.</string>
+    <string name="not_checked">Reading Mode has not been activated. Setup only checks root access.</string>
+    <string name="root_button">Grant root / check setup</string>
+    <string name="checking">Waiting for Magisk approval…</string>
+    <string name="ready">Ready. Controller state: %1$s. Use the tile to switch modes.</string>
+    <string name="failure">Setup check failed: %1$s</string>
+    <string name="add_tile">Add Quick Settings tile</string>
+    <string name="tile_added">Tile added. Reading Mode remains unchanged.</string>
+    <string name="add_unavailable">Add Reading Mode using the Quick Settings edit screen.</string>
+    <string name="applying">Applying…</string>
+    <string name="open_setup">Open Reading Mode setup</string>
+    <string name="mode_off">Off · tap for offline reading</string>
+    <string name="mode_on">Offline · tap to restore</string>
+    <string name="mode_recovery">Tap to finish restoring</string>
+    <string name="tile_description">Reading Mode: %1$s</string>
+</resources>

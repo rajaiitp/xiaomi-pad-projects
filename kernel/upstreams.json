@@ -1,0 +1,11 @@
+{
+  "lineageos": {
+    "url": "https://github.com/LineageOS/android_kernel_xiaomi_sm8250.git",
+    "commit": "71b13e62f057a649b77fe4062feb73ee72ad609c"
+  },
+  "magictime": {
+    "url": "https://github.com/TIMISONG-dev/kernel_xiaomi_sm8250.git",
+    "commit": "09fb1b6375cf522847e4d8c8b813090b62489104",
+    "patches": ["patches/pipa-ufs.patch"]
+  }
+}

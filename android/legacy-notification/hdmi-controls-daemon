@@ -1,0 +1,60 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Temporary HDMI notification compatibility layer. The root coordinator updates
+# HDMI_STATUS only on connector transitions; inotifyd makes this event-driven.
+
+HDMI_STATUS=/data/data/com.termux/files/home/.termux/hdmi-status
+NOTIFICATION_STATE=/data/data/com.termux/files/home/.termux/hdmi-notification-state
+NOTIFY=/data/data/com.termux/files/usr/bin/termux-notification
+REMOVE=/data/data/com.termux/files/usr/bin/termux-notification-remove
+SHORTCUTS=/data/data/com.termux/files/home/.shortcuts
+NOTIFICATION_ID=4242
+
+read_file() {
+  value=
+  if [ -r "$1" ]; then
+    IFS= read -r value <"$1" 2>/dev/null || true
+  fi
+  printf '%s' "$value"
+}
+
+handle_state() {
+  state=$(read_file "$HDMI_STATUS")
+  previous=$(read_file "$NOTIFICATION_STATE")
+  [ "$state" = "$previous" ] && return 0
+
+  case "$state" in
+    connected)
+      timeout 10 "$NOTIFY" --id "$NOTIFICATION_ID" --ongoing \
+        --title 'HDMI controls' \
+        --content 'Move current app between tablet and external display' \
+        --button1 HDMI --button1-action "$SHORTCUTS/move-hdmi" \
+        --button2 Tablet --button2-action "$SHORTCUTS/move-tablet"
+      ;;
+    disconnected)
+      # Avoid starting Termux:API merely to remove a notification after boot.
+      if [ "$previous" = connected ]; then
+        timeout 10 "$REMOVE" "$NOTIFICATION_ID" 2>/dev/null || true
+      fi
+      ;;
+    *) return 0 ;;
+  esac
+
+  printf '%s\n' "$state" >"$NOTIFICATION_STATE"
+}
+
+if [ "$#" -gt 0 ]; then
+  handle_state
+  exit
+fi
+
+# The root service may publish only after credential-encrypted Termux storage is
+# unlocked. This startup wait is bounded; steady-state operation has no timer.
+attempts=0
+while [ ! -f "$HDMI_STATUS" ] && [ "$attempts" -lt 30 ]; do
+  attempts=$((attempts + 1))
+  sleep 1
+done
+[ -f "$HDMI_STATUS" ] || exit 1
+
+handle_state
+exec /system/bin/inotifyd "$0" "$HDMI_STATUS:w"
