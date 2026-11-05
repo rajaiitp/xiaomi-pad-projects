@@ -1,10 +1,17 @@
 #!/system/bin/sh
 set -eu
 
+ROOT_SHELL=/data/adb/magisk/busybox
+if [ -x "$ROOT_SHELL" ] && [ "$(readlink /proc/$$/exe)" != "$(readlink -f "$ROOT_SHELL")" ]; then
+  exec "$ROOT_SHELL" sh "$0" "$@"
+fi
+
 PATH=${READING_MODE_COMMAND_PATH:-/system/bin:/system/xbin}
 export PATH
 STATE_DIR=${READING_MODE_STATE_DIR:-/data/adb/reading-mode}
 SNAPSHOT=$STATE_DIR/snapshot
+SETTINGS_LOCK=${READING_MODE_SETTINGS_LOCK:-$STATE_DIR/../power-mode-settings.lock}
+POWER_SNAPSHOT=${READING_MODE_POWER_SNAPSHOT:-$STATE_DIR/../power-mode/snapshot}
 SCHEMA_VERSION=1
 MAX_POLLS=25
 POLL_DELAY=0.2
@@ -241,6 +248,9 @@ umask 077
 [ ! -L "$STATE_DIR" ] || fail 'State directory must not be a symbolic link'
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
+[ ! -L "$SETTINGS_LOCK" ] || fail 'Shared settings lock must not be a symbolic link'
+exec 7>"$SETTINGS_LOCK"
+flock -n 7 || fail 'Another power controller is busy'
 exec 9>"$STATE_DIR/lock"
 flock -n 9 || fail 'Reading Mode is busy'
 trap finish EXIT
@@ -260,6 +270,9 @@ case $1 in
       restore || fail 'Reading Mode restoration failed'
       printf 'off\n'
     else
+      if [ -e "$POWER_SNAPSHOT" ] || [ -L "$POWER_SNAPSHOT" ]; then
+        fail 'Wait for Sleep mode restoration before enabling Reading Mode'
+      fi
       activate_reading_mode || fail 'Reading Mode activation failed'
       printf 'on\n'
     fi

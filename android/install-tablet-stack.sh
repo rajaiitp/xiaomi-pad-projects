@@ -62,13 +62,11 @@ adb_cmd=(adb -s "$serial")
 "${adb_cmd[@]}" get-state >/dev/null
 
 hdmi_script="$script_dir/../display/hdmi-panel-backlight.sh"
-charge_script="$script_dir/charge-threshold.sh"
 dispatcher="$script_dir/tablet-playback.sh"
 sshd_script="$script_dir/termux-boot/start-sshd"
 legacy_notification_dir="$script_dir/legacy-notification"
 for file in \
   "$hdmi_script" \
-  "$charge_script" \
   "$dispatcher" \
   "$sshd_script" \
   "$legacy_notification_dir/hdmi-controls-daemon" \
@@ -86,7 +84,6 @@ stage=/data/local/tmp/tablet-stack-stage-$stamp
 backup=/data/local/tmp/tablet-stack-backup-$stamp
 "${adb_cmd[@]}" shell "mkdir -p '$stage'"
 "${adb_cmd[@]}" push "$hdmi_script" "$stage/hdmi-panel-backlight.sh" >/dev/null
-"${adb_cmd[@]}" push "$charge_script" "$stage/charge-threshold.sh" >/dev/null
 "${adb_cmd[@]}" push "$dispatcher" "$stage/tablet-playback" >/dev/null
 "${adb_cmd[@]}" push "$sshd_script" "$stage/start-sshd" >/dev/null
 "${adb_cmd[@]}" push \
@@ -123,9 +120,6 @@ termux_uid=$(stat -c %u:%g /data/data/com.termux)
 cp "$stage/hdmi-panel-backlight.sh" /data/adb/service.d/hdmi-panel-backlight.sh
 chmod 0755 /data/adb/service.d/hdmi-panel-backlight.sh
 chown 0:0 /data/adb/service.d/hdmi-panel-backlight.sh
-cp "$stage/charge-threshold.sh" /data/adb/service.d/charge-threshold.sh
-chmod 0755 /data/adb/service.d/charge-threshold.sh
-chown 0:0 /data/adb/service.d/charge-threshold.sh
 cp "$stage/tablet-playback" /data/data/com.termux/files/home/bin/tablet-playback
 chmod 0755 /data/data/com.termux/files/home/bin/tablet-playback
 chown "$termux_uid" /data/data/com.termux/files/home/bin/tablet-playback
@@ -136,14 +130,6 @@ restorecon /data/adb/tablet-playback 2>/dev/null || true
 cp "$stage/start-sshd" /data/data/com.termux/files/home/.termux/boot/start-sshd
 chmod 0700 /data/data/com.termux/files/home/.termux/boot/start-sshd
 chown "$termux_uid" /data/data/com.termux/files/home/.termux/boot/start-sshd
-
-mkdir -p /data/adb/charge-threshold
-chmod 700 /data/adb/charge-threshold
-if [ -s /data/adb/charge-threshold.log ] && [ ! -s /data/adb/charge-threshold/service.log ]; then
-  mv /data/adb/charge-threshold.log /data/adb/charge-threshold/service.log
-fi
-chmod 600 /data/adb/charge-threshold/service.log 2>/dev/null || true
-chmod 600 /data/adb/charge-threshold/paused 2>/dev/null || true
 
 rm -f \
   /data/data/com.termux/files/home/.termux/boot/start-tailscale \

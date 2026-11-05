@@ -279,6 +279,20 @@ class ReadingModeTest(unittest.TestCase):
         self.run_controller("toggle")
         self.assertEqual(self.settings(), baseline)
 
+    def test_sleep_snapshot_prevents_overlapping_activation(self):
+        (self.root / "power-mode" / "snapshot").mkdir(parents=True)
+        result = self.run_controller("toggle", success=False)
+        self.assertIn("Sleep mode restoration", result.stderr)
+        self.assertEqual(self.settings(), BASELINE)
+        self.assertFalse((self.state / "snapshot").exists())
+
+    def test_shared_power_lock_prevents_activation_during_restoration(self):
+        with (self.root / "power-mode-settings.lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.run_controller("toggle", success=False)
+        self.assertIn("Another power controller", result.stderr)
+        self.assertEqual(self.settings(), BASELINE)
+
     def test_concurrent_toggle_is_rejected_without_mutation(self):
         self.run_controller("toggle")
         before = self.settings()

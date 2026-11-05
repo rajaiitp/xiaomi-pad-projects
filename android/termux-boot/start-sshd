@@ -10,9 +10,6 @@ CONF=$CONF_DIR/10-tablet.conf
 AUTHORIZED_KEYS=$HOME/.ssh/authorized_keys
 export HOME PATH PREFIX
 
-# Always-reachable mode intentionally holds a partial wake lock. The user chose
-# remote reliability over the lower-power behavior of a suspendable sshd.
-termux-wake-lock
 mkdir -p "$CONF_DIR"
 
 if [ -s "$AUTHORIZED_KEYS" ]; then

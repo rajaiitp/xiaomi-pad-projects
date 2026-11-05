@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sleep mode</string>
+    <string name="channel_name">Automatic Sleep mode</string>
+    <string name="off">Disabled by administrator</string>
+    <string name="armed">Automatic Sleep mode armed</string>
+    <string name="sleeping">Offline while asleep</string>
+    <string name="stopped">Controller stopped</string>
+    <string name="recovery">Recovery required — reconnect USB</string>
+    <string name="error">Unavailable — reconnect USB to verify recovery</string>
+    <string name="starting">Starting automatic Sleep mode…</string>
+</resources>

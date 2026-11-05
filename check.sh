@@ -21,3 +21,4 @@ mapfile -d '' java_sources < <(find "$root/android/apps" -type f -name '*.java' 
 "$JAVA_HOME/bin/java" -jar "$JAVA_FORMAT_JAR" --aosp --dry-run --set-exit-if-changed "${java_sources[@]}"
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$root/books/tests" -v
 "$root/android/check-reading-mode.sh"
+"$root/android/check-power-mode.sh"
