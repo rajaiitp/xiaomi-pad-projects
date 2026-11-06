@@ -11,6 +11,9 @@ export PATH
 STATE=${POWER_MODE_STATE_DIR:-/data/adb/power-mode}
 SETTINGS_LOCK=${POWER_MODE_SETTINGS_LOCK:-$STATE/../power-mode-settings.lock}
 READING_SNAPSHOT=${POWER_MODE_READING_SNAPSHOT:-$STATE/../reading-mode/snapshot}
+MEASUREMENT_TOOL=${POWER_MODE_MEASUREMENT_TOOL:-/data/adb/power-mode-measure}
+MEASUREMENT_TIMEOUT=4
+MEASUREMENT_ABORT_TIMEOUT=1
 SNAPSHOT=$STATE/snapshot
 ENABLED=$STATE/enabled
 SCHEMA=1
@@ -27,6 +30,22 @@ fail() {
   return 1
 }
 read_value() { IFS= read -r value <"$1" && printf '%s\n' "$value"; }
+run_measurement() (
+  exec 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+  exec timeout -s KILL "$@"
+)
+measurement_requested() { [ -f "$STATE/measurement/armed" ] || [ -f "$STATE/measurement-monitor" ]; }
+record_measurement() {
+  measurement_requested || return 0
+  if [ ! -x "$MEASUREMENT_TOOL" ]; then
+    printf 'Measurement tool unavailable\n' >&2
+    return 0
+  fi
+  if ! run_measurement "$MEASUREMENT_TIMEOUT" "$MEASUREMENT_TOOL" "$@" >/dev/null; then
+    printf 'Measurement capture failed; Sleep mode restoration remains independent\n' >&2
+    run_measurement "$MEASUREMENT_ABORT_TIMEOUT" "$MEASUREMENT_TOOL" abort capture_failed >/dev/null || true
+  fi
+}
 get_value() { timeout "$COMMAND_TIMEOUT" settings get global "$1"; }
 target() {
   case $1 in
@@ -122,6 +141,7 @@ restore() {
     fail 'Invalid snapshot retained'
     return 1
   }
+  record_measurement end "${1:-rollback}"
   phase restoring || return 1
   failed=0
   for name in low_power wifi_on bluetooth_on wifi_scan_always_enabled ble_scan_always_enabled; do
@@ -228,20 +248,38 @@ apply() {
   fi
   guard=0
   can_sleep || guard=$?
-  case $guard in 0) return 0 ;; 1) restore ;; 2)
+  case $guard in 0) ;; 1)
+    restore
+    return $?
+    ;;
+  2)
     restore
     return 1
     ;;
   *) return 1 ;; esac
+  if measurement_requested; then
+    record_measurement start
+    guard=0
+    can_sleep || guard=$?
+    case $guard in
+      0) record_measurement accept ;;
+      1) restore ineligible ;;
+      2)
+        restore unreadable
+        return 1
+        ;;
+      *) return 1 ;;
+    esac
+  fi
 }
 reconcile() {
   guard=0
   can_sleep || guard=$?
   case $guard in
     0) apply ;;
-    1) restore ;;
+    1) restore guard ;;
     2)
-      restore
+      restore unreadable
       fail 'Unreadable device guards'
       ;;
     *) return 1 ;;
@@ -277,9 +315,12 @@ operation() {
       printf '%s\n' "$SCHEMA" >"$STATE/enabled.new" && sync &&
         mv "$STATE/enabled.new" "$ENABLED" && sync && reconcile
       ;;
-    disable) restore && rm -f "$ENABLED" && sync ;;
+    disable) restore disabled && rm -f "$ENABLED" && sync ;;
     reconcile) reconcile ;;
-    recover) restore ;;
+    recover)
+      record_measurement abort recovery
+      restore recovery
+      ;;
     status) return 0 ;;
     *) fail 'Unknown operation' ;;
   esac
@@ -289,7 +330,8 @@ cleanup() {
   trap - EXIT HUP INT TERM
   if [ "$BROKER" = 1 ]; then
     if lock; then
-      restore || result=1
+      record_measurement abort disconnect
+      restore disconnect || result=1
       unlock || result=1
     else result=1; fi
   fi
@@ -333,7 +375,9 @@ if [ "$1" = broker ] || [ "$1" = recover ]; then
 fi
 if [ "$1" = broker ]; then
   BROKER=1
-  lock && restore && unlock || exit 1
+  lock || exit 1
+  record_measurement abort startup
+  restore startup && unlock || exit 1
   printf 'ready\n'
   while IFS= read -r request; do
     case $request in enable | disable | reconcile | status) ;; *) exit 1 ;; esac

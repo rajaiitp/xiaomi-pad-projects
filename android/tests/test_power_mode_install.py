@@ -116,6 +116,7 @@ class PowerModeInstallTest(unittest.TestCase):
         )
         (self.stage / "recover").write_text("#!/bin/sh\n: new-recovery\n")
         (self.stage / "reading").write_text("#!/bin/sh\n: new-reading\n")
+        (self.stage / "measurement").write_text("#!/bin/sh\n: new-measurement\n")
         (self.stage / "app.apk").write_text("new-apk")
         (self.root / "app.apk").write_text("old-apk")
         self.baseline = [
@@ -237,6 +238,54 @@ class PowerModeInstallTest(unittest.TestCase):
                 result = self.run_install()
                 self.assertIn("rollback=complete", result.stderr)
                 self.assert_rolled_back()
+
+    def test_install_and_rollback_preserve_monitor_configuration(self):
+        monitor = self.state / "measurement-monitor"
+        monitor.write_text("1:7\n")
+        self.run_install(success=True)
+        self.assertEqual(monitor.read_text(), "1:7\n")
+        self.change(
+            counts={}, faults={"am:start-foreground-service": 1}, mode="stopped"
+        )
+        self.run_install()
+        self.assertEqual(monitor.read_text(), "1:7\n")
+
+    def test_live_collector_lock_prevents_script_replacement(self):
+        directory = self.state / "measurement"
+        directory.mkdir()
+        with (directory / "lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.run_install()
+        self.assertIn("Rollback incomplete", result.stderr)
+        self.assertEqual(self.control.read_text(), self.baseline[0])
+        self.assertEqual((self.root / "app.apk").read_text(), "old-apk")
+        self.assertTrue((self.private / "maintenance").exists())
+
+    def test_descendant_holding_collector_lock_also_prevents_cutover(self):
+        directory = self.state / "measurement"
+        directory.mkdir()
+        lock = (directory / "lock").open("w")
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        child = subprocess.Popen(["/bin/sleep", "60"], pass_fds=(lock.fileno(),))
+        lock.close()
+        self.addCleanup(lambda: child.poll() is not None or child.kill())
+        self.addCleanup(lambda: child.poll() is not None or child.wait(timeout=3))
+        try:
+            result = self.run_install()
+            self.assertIn("Rollback incomplete", result.stderr)
+            self.assertEqual(self.control.read_text(), self.baseline[0])
+        finally:
+            child.kill()
+            child.wait(timeout=3)
+
+    def test_existing_measurement_tool_is_restored_on_failure(self):
+        tool = self.root / "data/adb/power-mode-measure"
+        tool.write_text("#!/bin/sh\n: prior-measurement\n")
+        original = tool.read_text()
+        self.change(faults={"am:start-foreground-service": 1})
+        self.run_install()
+        self.assertEqual(tool.read_text(), original)
+        self.assert_rolled_back()
 
     def test_existing_magisk_policy_is_restored_exactly(self):
         old_policy = [UID, 1, 1234567890, 0, 1]

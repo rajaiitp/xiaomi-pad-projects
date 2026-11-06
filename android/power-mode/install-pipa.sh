@@ -11,6 +11,7 @@ PACKAGE=local.power.mode
 CONTROL=$ROOT/data/adb/power-mode-control
 RECOVERY=$ROOT/data/adb/service.d/90-power-mode-recover.sh
 READING=$ROOT/data/adb/reading-mode-control
+MEASUREMENT=$ROOT/data/adb/power-mode-measure
 STATE=$ROOT/data/adb/power-mode
 SHARED_LOCK=$ROOT/data/adb/power-mode-settings.lock
 READING_STATE=$ROOT/data/adb/reading-mode
@@ -23,6 +24,7 @@ mutated=0
 committed=0
 shared_locked=0
 reading_locked=0
+measurement_locked=0
 policy_changed=0
 backup=
 uid=
@@ -32,7 +34,18 @@ fail() {
   printf '%s\n' "$*" >&2
   return 1
 }
+lock_measurement() {
+  [ ! -L "$STATE/measurement" ] && [ ! -L "$STATE/measurement/lock" ] || return 1
+  mkdir -p "$STATE/measurement" || return 1
+  exec 4>"$STATE/measurement/lock"
+  flock -n 4 || return 1
+  measurement_locked=1
+}
 release_locks() {
+  if [ "$measurement_locked" = 1 ]; then
+    flock -u 4 || return 1
+    measurement_locked=0
+  fi
   if [ "$shared_locked" = 1 ]; then
     flock -u 7 || return 1
     shared_locked=0
@@ -81,9 +94,18 @@ rollback() {
     [ "$(timeout "$INSTALL_TIMEOUT" "$CONTROL" disable)" = off ] || return 1
   fi
   [ ! -e "$STATE/snapshot" ] && [ ! -L "$STATE/snapshot" ] || return 1
+  exec 7>"$SHARED_LOCK"
+  flock -n 7 || return 1
+  shared_locked=1
+  exec 5>"$READING_STATE/lock"
+  flock -n 5 || return 1
+  reading_locked=1
+  [ ! -e "$READING_STATE/snapshot" ] || return 1
+  lock_measurement || return 1
   restore_file controller "$CONTROL" || return 1
   restore_file recovery "$RECOVERY" || return 1
   restore_file reading "$READING" || return 1
+  restore_file measurement "$MEASUREMENT" || return 1
   [ "$(timeout "$INSTALL_TIMEOUT" pm install -r -g -d "$backup/app.apk")" = Success ] || return 1
   am force-stop --user 0 "$PACKAGE" || return 1
   restore_policy || return 1
@@ -91,6 +113,7 @@ rollback() {
     cp -p "$backup/enabled" "$STATE/enabled" || return 1
   else rm -f "$STATE/enabled" || return 1; fi
   sync || return 1
+  release_locks || return 1
   case $prior_mode in
     armed | sleeping)
       am start-foreground-service --user 0 -n "$PACKAGE/.StandbyService" -a "$PACKAGE.RECONCILE" --ez allow_maintenance true >/dev/null || return 1
@@ -130,7 +153,7 @@ finish() {
 [ "$(id -u)" = 0 ] && [ "$(getprop ro.product.device)" = pipa ] || exit 1
 [ "$#" = 1 ] || exit 1
 stage=$1
-for file in controller recover reading app.apk; do [ -f "$stage/$file" ] || exit 1; done
+for file in controller recover reading measurement app.apk; do [ -f "$stage/$file" ] || exit 1; done
 [ "$(cmd activity get-current-user)" = 0 ] || {
   fail 'Install from the owner user'
   exit 1
@@ -151,6 +174,7 @@ for executable in timeout flock magisk pm am cmd restorecon; do command -v "$exe
 sh -n "$stage/controller"
 sh -n "$stage/recover"
 sh -n "$stage/reading"
+sh -n "$stage/measurement"
 chmod 0700 "$stage/controller"
 [ "$(POWER_MODE_STATE_DIR="$stage/check" "$stage/controller" check)" = ready ]
 uid=$(cmd package list packages -U --user 0 "$PACKAGE" | awk -v package="package:$PACKAGE" '$1 == package {sub(/^uid:/,"",$2); print $2}')
@@ -169,7 +193,7 @@ flock -n 6 || {
 }
 backup=$(mktemp -d "$ROOT/data/adb/power-mode-backups/standby.XXXXXX")
 cp -p "$apk" "$backup/app.apk"
-for entry in "controller:$CONTROL" "recovery:$RECOVERY" "reading:$READING" "enabled:$STATE/enabled"; do
+for entry in "controller:$CONTROL" "recovery:$RECOVERY" "reading:$READING" "measurement:$MEASUREMENT" "enabled:$STATE/enabled"; do
   name=${entry%%:*} path=${entry#*:}
   [ ! -e "$path" ] || cp -p "$path" "$backup/$name"
 done
@@ -197,15 +221,16 @@ if [ -x "$CONTROL" ]; then [ "$(timeout "$INSTALL_TIMEOUT" "$CONTROL" disable)" 
 exec 8>"$STATE/controller.lock"
 flock -n 8
 flock -u 8
-exec 5>"$READING_STATE/lock"
-flock -n 5
-reading_locked=1
 exec 7>"$SHARED_LOCK"
 flock -n 7
 shared_locked=1
+exec 5>"$READING_STATE/lock"
+flock -n 5
+reading_locked=1
 [ ! -e "$READING_STATE/snapshot" ]
+lock_measurement
 [ "$(timeout "$INSTALL_TIMEOUT" pm install -r -g "$stage/app.apk")" = Success ]
-for entry in "controller:$CONTROL" "recover:$RECOVERY" "reading:$READING"; do
+for entry in "controller:$CONTROL" "recover:$RECOVERY" "reading:$READING" "measurement:$MEASUREMENT"; do
   name=${entry%%:*} path=${entry#*:}
   cp "$stage/$name" "$path.new"
   chmod 0700 "$path.new"

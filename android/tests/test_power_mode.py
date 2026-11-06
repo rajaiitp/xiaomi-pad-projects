@@ -6,6 +6,7 @@ import select
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -247,6 +248,99 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(self.send(broker, "enable"), "sleeping")
         self.command("recover", success=False)
         self.assertTrue((self.state / "snapshot").exists())
+
+    def test_measurement_failure_does_not_break_policy_or_protocol(self):
+        tool = self.root / "measurement"
+        tool.write_text("#!/bin/sh\nprintf 'not-a-broker-response\\n'\nexit 1\n")
+        tool.chmod(0o755)
+        self.environment["POWER_MODE_MEASUREMENT_TOOL"] = str(tool)
+        broker = self.broker()
+        (self.state / "measurement").mkdir()
+        (self.state / "measurement/armed").write_text("1\n")
+        self.assertEqual(self.send(broker, "enable"), "sleeping")
+        self.guard(wake="Awake")
+        self.assertEqual(self.send(broker, "reconcile"), "armed")
+        self.assertEqual(self.settings(), BASELINE)
+
+    def test_monitor_flag_records_each_policy_without_one_shot_arming(self):
+        tool = self.root / "measurement"
+        tool.write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >>\"$FAKE_ANDROID/monitor-calls\"\nprintf 'not-a-broker-response\\n'\n"
+        )
+        tool.chmod(0o755)
+        self.environment["POWER_MODE_MEASUREMENT_TOOL"] = str(tool)
+        self.state.mkdir()
+        (self.state / "measurement-monitor").write_text("1:7\n")
+        broker = self.broker()
+        self.assertEqual(self.send(broker, "enable"), "sleeping")
+        self.assertEqual(self.send(broker, "reconcile"), "sleeping")
+        self.guard(wake="Awake")
+        self.assertEqual(self.send(broker, "reconcile"), "armed")
+        self.guard(wake="Asleep")
+        self.assertEqual(self.send(broker, "reconcile"), "sleeping")
+        calls = (self.root / "monitor-calls").read_text().splitlines()
+        self.assertEqual(calls.count("start"), 2)
+        self.assertEqual(calls.count("accept"), 2)
+        self.assertEqual(calls.count("end"), 1)
+        self.assertFalse((self.state / "measurement/armed").exists())
+
+    def test_term_resistant_measurement_cannot_block_restoration(self):
+        tool = self.root / "measurement"
+        tool.write_text("#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 60\n")
+        tool.chmod(0o755)
+        self.environment["POWER_MODE_MEASUREMENT_TOOL"] = str(tool)
+        broker = self.broker()
+        self.assertEqual(self.send(broker, "enable"), "sleeping")
+        (self.state / "measurement").mkdir()
+        (self.state / "measurement/armed").write_text("1\n")
+        self.guard(wake="Awake")
+        started = time.monotonic()
+        self.assertEqual(self.send(broker, "reconcile"), "armed")
+        self.assertLess(time.monotonic() - started, 9)
+        self.assertEqual(self.settings(), BASELINE)
+
+    def test_measurement_descendants_do_not_keep_controller_locks(self):
+        tool = self.root / "measurement"
+        tool.write_text(
+            "#!/bin/sh\ncase $1 in\n"
+            "end) printf 'capture-started\\n' >&2; trap '' TERM; exec /bin/sleep 60 ;;\n"
+            'abort) rm -f "$POWER_MODE_STATE_DIR/measurement/armed" ;;\nesac\n'
+        )
+        tool.chmod(0o755)
+        self.environment["POWER_MODE_MEASUREMENT_TOOL"] = str(tool)
+        broker = self.broker()
+        self.assertEqual(self.send(broker, "enable"), "sleeping")
+        (self.state / "measurement").mkdir()
+        (self.state / "measurement/armed").write_text("1\n")
+        self.guard(wake="Awake")
+        broker.stdin.write("reconcile\n")
+        broker.stdin.flush()
+        self.assertTrue(select.select([broker.stderr], [], [], 3)[0])
+        self.assertEqual(broker.stderr.readline(), "capture-started\n")
+        broker.kill()
+        broker.wait(timeout=3)
+        self.assertEqual(self.command("recover"), "stopped")
+        self.assertEqual(self.settings(), BASELINE)
+
+    def test_wake_during_measurement_capture_is_rechecked(self):
+        tool = self.root / "measurement"
+        tool.write_text(
+            f"#!{sys.executable}\nimport json, os, sys\nfrom pathlib import Path\n"
+            "root=Path(os.environ['FAKE_ANDROID'])\n"
+            "with (root/'measure-calls').open('a') as log: log.write(sys.argv[1]+'\\n')\n"
+            "if sys.argv[1]=='start':\n"
+            " data=json.loads((root/'guard').read_text()); data['wake']='Awake'; (root/'guard').write_text(json.dumps(data))\n"
+        )
+        tool.chmod(0o755)
+        self.environment["POWER_MODE_MEASUREMENT_TOOL"] = str(tool)
+        broker = self.broker()
+        (self.state / "measurement").mkdir()
+        (self.state / "measurement/armed").write_text("1\n")
+        self.assertEqual(self.send(broker, "enable"), "armed")
+        self.assertEqual(self.settings(), BASELINE)
+        self.assertNotIn(
+            "accept", (self.root / "measure-calls").read_text().splitlines()
+        )
 
     def test_reading_charging_and_external_display_prevent_apply(self):
         broker = self.broker()

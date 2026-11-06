@@ -14,11 +14,12 @@ scripts=("$script_dir"/{build,check,format,install,probe}-power-mode.sh)
 "$shfmt" -d -i 2 -ci "$script_dir"/power-mode/*.sh "${scripts[@]}"
 "$shellcheck" -s sh "$script_dir"/power-mode/*.sh
 "$shellcheck" "${scripts[@]}"
-"$ruff" format --check "$script_dir/tests/test_power_mode.py" "$script_dir/tests/test_charge_limit.py" "$script_dir/tests/test_power_mode_install.py"
-"$ruff" check "$script_dir/tests/test_power_mode.py" "$script_dir/tests/test_charge_limit.py" "$script_dir/tests/test_power_mode_install.py"
+python_sources=("$script_dir/tests/test_power_mode.py" "$script_dir/tests/test_charge_limit.py" "$script_dir/tests/test_power_mode_install.py" "$script_dir/tests/test_standby_measurement.py" "$script_dir/power-mode/analyze.py")
+"$ruff" format --check "${python_sources[@]}"
+"$ruff" check "${python_sources[@]}"
 mapfile -t sources < <(find "$project/src" "$project/tests/java" "$project/probe" -name '*.java' -type f | sort)
 "$java_home/bin/java" -jar "$java_formatter" --aosp --dry-run --set-exit-if-changed "${sources[@]}"
-for pattern in test_power_mode.py test_charge_limit.py test_power_mode_install.py; do
+for pattern in test_power_mode.py test_charge_limit.py test_power_mode_install.py test_standby_measurement.py; do
   PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$script_dir/tests" -p "$pattern" -v
 done
 test_output="$script_dir/power-mode/build/tests"

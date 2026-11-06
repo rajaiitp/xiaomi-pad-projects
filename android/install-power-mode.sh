@@ -42,7 +42,7 @@ cleanup() {
 trap cleanup EXIT
 "$adb_bin" -s "$serial" shell mkdir "$stage"
 for entry in "power-mode/power-mode-control.sh:controller" "power-mode/recover-on-boot.sh:recover" \
-  "power-mode/install-pipa.sh:install" "reading-mode.sh:reading"; do
+  "power-mode/install-pipa.sh:install" "reading-mode.sh:reading" "power-mode/measure-standby.sh:measurement"; do
   "$adb_bin" -s "$serial" push "$script_dir/${entry%:*}" "$stage/${entry#*:}" >/dev/null
 done
 "$adb_bin" -s "$serial" push "$apk" "$stage/app.apk" >/dev/null
